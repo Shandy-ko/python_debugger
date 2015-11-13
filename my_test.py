@@ -8,4 +8,8 @@ import my_debugger
 
 debugger = my_debugger.debugger()
 
-debugger.load("C:\\WINDOWS\\SYSTEM32\\calc.exe")
+pid = raw_input("Enter the PID of the process to atach to: ")
+
+debugger.attach(int(pid))
+debugger.run()
+debugger.detach()
