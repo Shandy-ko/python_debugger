@@ -85,8 +85,8 @@ class debugger():
 
             #イベントハンドラはまだ用意していない
             #さしあたってはプロセスを再開するにとどめる
-            raw_input("Press a key to continue...")
-            self.debugger_active = False
+            #raw_input("Press a key to continue...")
+            #self.debugger_active = False
             kernel32.ContinueDebugEvent(
                 debug_event.dwProcessId,
                 debug_event.dwThreadId,
