@@ -15,6 +15,9 @@ class debugger():
         self.h_process = None
         self.pid = None
         self.debugger_active = False
+        self.h_thread = None
+        self.context = None
+        self.eception_address = None
 
     def load(self,path_to_exe):
 
@@ -83,14 +86,37 @@ class debugger():
 
         if kernel32.WaitForDebugEvent(byref(debug_event),INFINITE):
 
-            #イベントハンドラはまだ用意していない
-            #さしあたってはプロセスを再開するにとどめる
-            #raw_input("Press a key to continue...")
-            #self.debugger_active = False
+            #スレッドとコンテキストの情報を取得
+            self.h_thread = self.open_thread(debug_event.dwThreadId)
+            self.context = self.get_thread_context(h_thread=self.h_thread)
+            print "Event Code: %d Thread ID: %d" % (debug_event.dwDebugEventCode, debug_event.dwThreadId)
+
+
+            #イベントコードが例外を示していればさらに調査する
+            if debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT:
+
+                #例外コードを調べる
+                exception = debug_event.u.ExceptionRecord.ExceptionCode
+                self.exception_address = debug_event.u.ExceptionRecord.exception_address
+
+                if exception == EXCEPTION_ACCESS_VIOLATION:
+                    print "Access Violation Detected."
+
+                #ブレークポイントであれば内部ハンドラを呼び出す
+                elif exception == EXCEPTION_BREAKPOINT:
+                    continue_status = self.exception_handler_breakpoint()
+
+                elif exception == EXCEPTION_GUARD_PAGE:
+                    print "Guard Page Access Detected."
+
+                elif exception == EXCEPTION_SINGLE_STEP:
+                    print "Single Stepping."
+
+
             kernel32.ContinueDebugEvent(
                 debug_event.dwProcessId,
                 debug_event.dwThreadId,
-                continue_status )
+                continue_status)
 
     def detach(self):
         if kernel32.DebugActiveProcessStop(self.pid):
@@ -142,3 +168,9 @@ class debugger():
             return context
         else:
             return False
+
+    def exception_handler_breakpoint():
+
+        print "[*] Inside the breakpoint handler."
+        print "Exception Address: 0x%08x" % self.exception_address
+        return DBG_CONTINUE
