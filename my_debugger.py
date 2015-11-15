@@ -19,10 +19,10 @@ class debugger():
     def load(self,path_to_exe):
 
         #dwCreationFlagsによりプロセスをどのように生成するかが決まる
-                    #電卓のGUIを見たければ creation_flags = CREATION_NEW_CONSOLE
+        #電卓のGUIを見たければ creation_flags = CREATION_NEW_CONSOLE
         creation_flags = DEBUG_PROCESS
 
-                    #構造体をインスタンス化
+        #構造体をインスタンス化
         startupinfo = STARTUPINFO()
         process_information = PROCESS_INFORMATION()
 
@@ -99,4 +99,51 @@ class debugger():
             return True
         else:
             print "There was an error."
+            return False
+
+    def open_thread(self,thread_id):
+
+        h_thread = kernel32.OpenThread(THREAD_ALLACCESS, None, thread_id)
+
+        if h_thread is not 0:
+            return h_thread
+        else:
+            print "[*] Could not obtain a valid thread handle."
+            return False
+
+    def enumerate_threads(self):
+        thread_entry = THREADENTRY32()
+        thread_list = []
+        snapshot = kernel32.CreatToolhelp32Snapshot(
+            TH32CS_SNAPTHREAD, self.pid)
+
+        if snapshot is not None:
+            #構造体のサイズを設定しておかないと呼び出しが失敗する
+            thread_entry.dwSize = sizeof(thread_entry)
+            success = kernel32.Thread32First(snapshot,
+                byref(thread_entry))
+
+            while sucess:
+                if thread_entry.th32OwnerProcessID == self.pid:
+                    thread_list.append(thread_entry.th32ThreadID)
+                    success = kernel32.Thread32Next(snapshot,
+                        byref(thread_entry))
+
+            kernel32.CloseHandle(snapshot)
+            return thread_list
+        else:
+            return False:
+
+    def get_thread_context(self, thread_id=None, h_thread=None):
+
+        context = CONTEXT()
+        context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS
+
+        #スレッドのハンドルを取得
+        if h_thread is None:
+            h_thread = self.open_thread(thread_id)
+        if kernel32.GetThreadContext(h_thread, byref(context)):
+            kernel32.CloseHandle(h_thread)
+            return context
+        else:
             return False
