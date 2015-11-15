@@ -132,7 +132,7 @@ class debugger():
             kernel32.CloseHandle(snapshot)
             return thread_list
         else:
-            return False:
+            return False
 
     def get_thread_context(self, thread_id=None, h_thread=None):
 
