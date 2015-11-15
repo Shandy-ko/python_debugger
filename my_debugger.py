@@ -93,17 +93,15 @@ class debugger():
                 continue_status )
 
     def detach(self):
-
         if kernel32.DebugActiveProcessStop(self.pid):
-            print "[*] Finished debugging.Exiting..."
+            print "[*] Finished debugging. Exiting..."
             return True
         else:
-            print "There was an error."
+            print "There was an error"
             return False
 
-    def open_thread(self,thread_id):
-
-        h_thread = kernel32.OpenThread(THREAD_ALLACCESS, None, thread_id)
+    def open_thread(self, thread_id):
+        h_thread = kernel32.OpenThread(THREAD_ALL_ACCESS, None, thread_id)
 
         if h_thread is not 0:
             return h_thread
@@ -114,20 +112,17 @@ class debugger():
     def enumerate_threads(self):
         thread_entry = THREADENTRY32()
         thread_list = []
-        snapshot = kernel32.CreatToolhelp32Snapshot(
-            TH32CS_SNAPTHREAD, self.pid)
 
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, self.pid)
         if snapshot is not None:
             #構造体のサイズを設定しておかないと呼び出しが失敗する
             thread_entry.dwSize = sizeof(thread_entry)
-            success = kernel32.Thread32First(snapshot,
-                byref(thread_entry))
+            success = kernel32.Thread32First(snapshot,byref(thread_entry))
 
-            while sucess:
+            while success:
                 if thread_entry.th32OwnerProcessID == self.pid:
                     thread_list.append(thread_entry.th32ThreadID)
-                    success = kernel32.Thread32Next(snapshot,
-                        byref(thread_entry))
+                success = kernel32.Thread32Next(snapshot, byref(thread_entry))
 
             kernel32.CloseHandle(snapshot)
             return thread_list

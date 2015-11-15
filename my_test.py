@@ -12,10 +12,10 @@ pid = raw_input("Enter the PID of the process to atach to: ")
 
 debugger.attach(int(pid))
 list = debugger.enumerate_threads()
+print list
 
 #リスト中の各スレッドについて各レジスタの値を取得
 for thread in list:
-
     thread_context = debugger.get_thread_context(thread)
 
     #レジスタの内容をいくつか取得
