@@ -17,7 +17,7 @@ class debugger():
         self.debugger_active = False
         self.h_thread = None
         self.context = None
-        self.eception_address = None
+        self.software_breakpoints = {}
 
     def load(self,path_to_exe):
 
@@ -174,3 +174,43 @@ class debugger():
         print "[*] Inside the breakpoint handler."
         print "Exception Address: 0x%08x" % self.exception_address
         return DBG_CONTINUE
+
+    def read_process_memory(self,address,length):
+        data = ""
+        read_buf = create_string_buffer(length)
+        count = c_ulong(0)
+
+        if not kernel32.ReadProcessMemory(self.h_process,
+                                            address,
+                                            read_buf,
+                                            length,
+                                            byref(count)):
+            return False
+
+        else:
+            data += read_buf.raw
+            return data
+
+    def bp_set_sw(self,address):
+        print "[*] Setting breakpoint at: 0x%08x" % address
+        if not self.software_breakpoints.has_key(address):
+            try:
+                #オリジナルのバイトを保存
+                original_byte = self.read_process_memory(address, 1)
+
+                #INT3のオペコードを書き込む
+                self.write_process_memory(address, "\xCC")
+
+                #内部にブレークポイントを登録
+                self.software_breakpoints[address] = (original_byte)
+            except:
+                return False
+
+        return True
+
+    def func_resolve(self,dll,function):
+
+        handle = kernel32.GetModuleHandleA(dll)
+        address = kernel32.GetProcAddress(handle, function)
+        kernel32.CloseHandle(handle)
+        return address
