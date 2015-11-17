@@ -29,13 +29,14 @@ debugger.attach(int(pid))
 #    print "[**] EDX: 0x%08x" % thread_context.Edx
 #    print "[*] END DUMP"
 
-#debugger.run()
 
-prinf_address = debugger.func_resolve("msvcrt.dll", "printf")
+
+printf_address = debugger.func_resolve("msvcrt.dll","printf")
 
 print "[*] Address of  printf: 0x%08x" % printf_address
 
 debugger.bp_set_sw(printf_address)
 
 
-debugger.detach()
+debugger.run()
+#debugger.detach()

@@ -96,8 +96,8 @@ class debugger():
             if debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT:
 
                 #例外コードを調べる
-                exception = debug_event.u.ExceptionRecord.ExceptionCode
-                self.exception_address = debug_event.u.ExceptionRecord.exception_address
+                exception =  debug_event.u.Exception.ExceptionRecord.ExceptionCode
+                self.exception_address = debug_event.u.Exception.ExceptionRecord.ExceptionAddress
 
                 if exception == EXCEPTION_ACCESS_VIOLATION:
                     print "Access Violation Detected."
@@ -113,10 +113,9 @@ class debugger():
                     print "Single Stepping."
 
 
-            kernel32.ContinueDebugEvent(
-                debug_event.dwProcessId,
-                debug_event.dwThreadId,
-                continue_status)
+            kernel32.ContinueDebugEvent( debug_event.dwProcessId,
+                                        debug_event.dwThreadId,
+                                        continue_status )
 
     def detach(self):
         if kernel32.DebugActiveProcessStop(self.pid):
