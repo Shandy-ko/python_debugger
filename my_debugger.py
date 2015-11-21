@@ -18,6 +18,8 @@ class debugger():
         self.h_thread = None
         self.context = None
         self.software_breakpoints = {}
+        self.first_breakpoint = True
+        self.hardware_breakpoints = {}
 
     def load(self,path_to_exe):
 
@@ -213,3 +215,59 @@ class debugger():
         address = kernel32.GetProcAddress(handle, function)
         kernel32.CloseHandle(handle)
         return address
+
+    def bp_set_hw(self, address, length, condition):
+
+        #長さの値が有効かチェック
+        if length not in (1,2,4):
+            return False
+        else:
+            length -= 1
+
+        #タイプ(条件)が有効かどうかをチェック
+        if condition not in (HW_ACCESS, HW_EXECUTE, HW_WRITE):
+            return False
+
+        #空いているレジスタをチェック
+        if not self.hardware_breakpoints.has_key(0):
+            available = 0
+        elif not self.hardware_breakpoints.has_key(1):
+            available = 1
+        elif not self.hardware_breakpoints.has_key(2):
+            available = 2
+        elif not self.hardware_breakpoints.has_key(3):
+            available = 3
+        else:
+            return False
+
+        #全スレッドについてデバックレジスタ設定を行う
+        for thread_id in self.enumerate_threads():
+            context = self.get_thread_context(thread_id=thread_id)
+
+            #DR7レジスタ中の対応するビットを設定してブレークポイントを有効にする
+            context.Dr7 |= 1 << (available * 2)
+
+            #空いているレジスタにブレークポイントのアドレスを設定
+            if available == 0:
+                context.Dr0 = address
+            elif available == 1:
+                context.Dr1 = address
+            elif available == 2:
+                context.Dr2 = address
+            elif available == 3:
+                context.Dr3 == address
+
+            #ブレークポイントのタイプ(条件)を設定
+            context.Dr7 |= condition << ((available * 4) + 16)
+
+            #長さを設定
+            context.Dr7 |= length << ((available * 4) +18)
+
+            #ブレークポイントを設定したスレッドコンテキストを設定
+            h_thread = self.open_thread(thread_id)
+            kernel32.SetThreadContext(h_thread,byref(context))
+
+        #利用するレジスタについてハードウェアブレークポイントの辞書を更新
+        self.hardware_breakpoints[available] = (address,length,condition)
+
+        return True
