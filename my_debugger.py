@@ -112,7 +112,8 @@ class debugger():
                     print "Guard Page Access Detected."
 
                 elif exception == EXCEPTION_SINGLE_STEP:
-                    print "Single Stepping."
+                    continue_status = self.exception_handler_single_step()
+
 
 
             kernel32.ContinueDebugEvent( debug_event.dwProcessId,
@@ -269,5 +270,63 @@ class debugger():
 
         #利用するレジスタについてハードウェアブレークポイントの辞書を更新
         self.hardware_breakpoints[available] = (address,length,condition)
+
+        return True
+
+    def exception_handler_single_step():
+        #Pydbgのコメント:
+        #この単一ステップイベントがハードウェアブレークポイントを受けて発生したのかをチェックし到達したブレークポイントを決定する
+        #IntelのドキュメントによればDR6の中のBSフラグをチェックできるはず
+        #しかしWindowsはそのフラグを適切に伝えてくれていない模様
+        if self.context.Dr6 & 0x1 and self.hardware_breakpoints.has_key(0):
+            slot = 0
+        elif self.context.Dr6 & 0x2 and self.hardware_breakpoints.has_key(1):
+            slot = 1
+        elif self.context.Dr6 & 0x4 and self.hardware_breakpoints.has_key(2):
+            slot = 2
+        elif self.context.Dr6 & 0x8 and self.hardware_breakpoints.has_key(3):
+            slot = 3
+        else:
+            #ハードウェアブレークポイントによって生成されたINT1ではなかった
+            continue_status = DBG_EXCEPTION_NOT_HANDLED
+
+        #辞書からブレークポイントを除去
+        if self.bp_del_hw(slot):
+            continue_status = DBG_CONTINUE
+
+        print "[*] Hardware breakpoint removed."
+        return continue_status
+
+    def bp_del_hw(self,slot):
+
+        #全アクティブスレッドについてブレークポイントを無効化
+        for thread_id in self.enumerate_threads():
+
+            context = self.get_thread_context(thread_id=thread_id)
+
+            #フラグビットをリセットしてブレークポイントを除去
+            context.Dr7 &= ~(1 << (slot * 2))
+
+            #アドレスをゼロクリア
+            if slot == 0:
+                context.Dr0 = 0x00000000
+            elif slot == 1:
+                context.Dr1 = 0x00000000
+            elif slot == 2:
+                context.Dr2 = 0x00000000
+            elif slot == 3:
+                context.Dr3 = 0x00000000
+
+            #条件フラグをクリア
+            context.Dr7 &= ~(3 << ((slot * 4) + 16))
+
+            #長さフラグをクリア
+            context.Dr7 &= ~(3 << ((slot * 4) + 18))
+
+            #ブレークポイントを除去したコンテキストを設定し直す
+            h_thread = self.open_thread(thread_id)
+            kernel32.SetThreadContext(h_thread,byref(context))
+
+        del self.hardware_breakpoints[slot]
 
         return True
