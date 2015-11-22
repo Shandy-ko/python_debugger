@@ -1,10 +1,4 @@
 # coding: UTF-8
-'''
-Created on 2015/11/13
-
-@author: root
-'''
-
 from ctypes import *
 from my_debugger_defines import *
 
@@ -17,17 +11,20 @@ class debugger():
         self.debugger_active = False
         self.h_thread = None
         self.context = None
+        self.exception = None
+        self.exception_address = None
         self.software_breakpoints = {}
         self.first_breakpoint = True
         self.hardware_breakpoints = {}
+        self.guarded_pages = []
+        self.memory_breakpoints = {}
 
         #ここでシステムのデフォルトページサイズを求めて保存
         system_info = SYSTEM_INFO()
-        kernel32.GetSyetemInfo(byref(system_info))
+        kernel32.GetSystemInfo(byref(system_info))
         self.page_size = system_info.dwPageSize
 
-    def load(self,path_to_exe):
-
+    def load(self, path_to_exe):
         #dwCreationFlagsによりプロセスをどのように生成するかが決まる
         #電卓のGUIを見たければ creation_flags = CREATION_NEW_CONSOLE
         creation_flags = DEBUG_PROCESS
@@ -54,23 +51,19 @@ class debugger():
                                    None,
                                    byref(startupinfo),
                                    byref(process_information)):
-
             print "[*] We have successfully launched the process!"
             print "[*] PID: %d" % process_information.dwProcessId
 
             #プロセスのハンドルを取得し将来の利用に備えて保存
             self.h_process = self.open_process(process_information.dwProcessId)
-
         else:
             print "[*] Error: 0x%08x." % kernel32.GetLastError()
 
-    def open_process(self,pid):
-
-        h_process = kernel32.OpenProcess(PROCESS_ALL_ACCESS,False,pid)
+    def open_process(self, pid):
+        h_process = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
         return h_process
 
-    def attach(self,pid):
-
+    def attach(self, pid):
         self.h_process = self.open_process(pid)
 
         #プロセスへのアタッチを試みる
@@ -87,43 +80,34 @@ class debugger():
             self.get_debug_event()
 
     def get_debug_event(self):
-
         debug_event = DEBUG_EVENT()
         continue_status = DBG_CONTINUE
 
-        if kernel32.WaitForDebugEvent(byref(debug_event),INFINITE):
+        if kernel32.WaitForDebugEvent(byref(debug_event), INFINITE):
+            #raw_input("Press a key to continue...")
 
-            #スレッドとコンテキストの情報を取得
-            self.h_thread = self.open_thread(debug_event.dwThreadId)
-            self.context = self.get_thread_context(h_thread=self.h_thread)
-            print "Event Code: %d Thread ID: %d" % (debug_event.dwDebugEventCode, debug_event.dwThreadId)
-
+            print "Event Code: %d, Thread ID: %d" % (debug_event.dwDebugEventCode,
+                                                     debug_event.dwThreadId)
+            self.context = self.get_thread_context(thread_id=debug_event.dwThreadId)
 
             #イベントコードが例外を示していればさらに調査する
             if debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT:
-
-                #例外コードを調べる
-                exception =  debug_event.u.Exception.ExceptionRecord.ExceptionCode
+                self.exception =  debug_event.u.Exception.ExceptionRecord.ExceptionCode
                 self.exception_address = debug_event.u.Exception.ExceptionRecord.ExceptionAddress
 
-                if exception == EXCEPTION_ACCESS_VIOLATION:
+                if self.exception == EXCEPTION_ACCESS_VIOLATION:
                     print "Access Violation Detected."
-
-                #ブレークポイントであれば内部ハンドラを呼び出す
-                elif exception == EXCEPTION_BREAKPOINT:
+                elif self.exception == EXCEPTION_BREAKPOINT:
                     continue_status = self.exception_handler_breakpoint()
-
-                elif exception == EXCEPTION_GUARD_PAGE:
-                    print "Guard Page Access Detected."
-
-                elif exception == EXCEPTION_SINGLE_STEP:
+                elif self.exception == EXCEPTION_GUARD_PAGE:
+                    print"Guard Page Access Detected."
+                elif self.exception == EXCEPTION_SINGLE_STEP:
                     continue_status = self.exception_handler_single_step()
 
-
-
-            kernel32.ContinueDebugEvent( debug_event.dwProcessId,
-                                        debug_event.dwThreadId,
-                                        continue_status )
+            #self.debugger_active = False
+            kernel32.ContinueDebugEvent(debug_event.dwProcessId,
+                                       debug_event.dwThreadId,
+                                       continue_status)
 
     def detach(self):
         if kernel32.DebugActiveProcessStop(self.pid):
@@ -150,7 +134,7 @@ class debugger():
         if snapshot is not None:
             #構造体のサイズを設定しておかないと呼び出しが失敗する
             thread_entry.dwSize = sizeof(thread_entry)
-            success = kernel32.Thread32First(snapshot,byref(thread_entry))
+            success = kernel32.Thread32First(snapshot, byref(thread_entry))
 
             while success:
                 if thread_entry.th32OwnerProcessID == self.pid:
@@ -163,43 +147,55 @@ class debugger():
             return False
 
     def get_thread_context(self, thread_id=None, h_thread=None):
-
         context = CONTEXT()
         context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS
 
         #スレッドのハンドルを取得
-        if h_thread is None:
-            h_thread = self.open_thread(thread_id)
+        if h_thread == None:
+            h_thread = self.open_thread(thread_id=thread_id)
         if kernel32.GetThreadContext(h_thread, byref(context)):
             kernel32.CloseHandle(h_thread)
             return context
         else:
             return False
 
-    def exception_handler_breakpoint():
-
+    def exception_handler_breakpoint(self):
         print "[*] Inside the breakpoint handler."
         print "Exception Address: 0x%08x" % self.exception_address
         return DBG_CONTINUE
 
-    def read_process_memory(self,address,length):
+    def read_process_memory(self, address, length):
         data = ""
         read_buf = create_string_buffer(length)
         count = c_ulong(0)
 
         if not kernel32.ReadProcessMemory(self.h_process,
-                                            address,
-                                            read_buf,
-                                            length,
-                                            byref(count)):
+                                          address,
+                                          read_buf,
+                                          length,
+                                          byref(count)):
             return False
-
         else:
             data += read_buf.raw
             return data
 
-    def bp_set_sw(self,address):
-        print "[*] Setting breakpoint at: 0x%08x" % address
+    def write_process_memory(self, address, data):
+        count = c_ulong(0)
+        length = len(data)
+
+        c_data = c_char_p(data[count.value:])
+
+        if not kernel32.WriteProcessMemory(self.h_process,
+                                           address,
+                                           c_data,
+                                           length,
+                                           byref(count)):
+            return False
+        else:
+            return True
+
+    def bp_set_sw(self, address):
+        print "[*] Settingbreakpoint at: 0x%08x" % address
         if not self.software_breakpoints.has_key(address):
             try:
                 #オリジナルのバイトを保存
@@ -209,23 +205,24 @@ class debugger():
                 self.write_process_memory(address, "\xCC")
 
                 #内部にブレークポイントを登録
-                self.software_breakpoints[address] = (original_byte)
+                self.software_breakpoints[address] = (address, original_byte)
             except:
                 return False
 
         return True
 
-    def func_resolve(self,dll,function):
-
+    def func_resolve(self, dll, function):
         handle = kernel32.GetModuleHandleA(dll)
         address = kernel32.GetProcAddress(handle, function)
+
         kernel32.CloseHandle(handle)
+
         return address
 
     def bp_set_hw(self, address, length, condition):
 
         #長さの値が有効かチェック
-        if length not in (1,2,4):
+        if length not in (1, 2, 4):
             return False
         else:
             length -= 1
@@ -261,28 +258,29 @@ class debugger():
             elif available == 2:
                 context.Dr2 = address
             elif available == 3:
-                context.Dr3 == address
+                context.Dr3 = address
 
             #ブレークポイントのタイプ(条件)を設定
             context.Dr7 |= condition << ((available * 4) + 16)
-
             #長さを設定
-            context.Dr7 |= length << ((available * 4) +18)
+            context.Dr7 |= length << ((available * 4) + 18)
 
             #ブレークポイントを設定したスレッドコンテキストを設定
             h_thread = self.open_thread(thread_id)
-            kernel32.SetThreadContext(h_thread,byref(context))
+            kernel32.SetThreadContext(h_thread, byref(context))
 
         #利用するレジスタについてハードウェアブレークポイントの辞書を更新
-        self.hardware_breakpoints[available] = (address,length,condition)
+        self.hardware_breakpoints[available] = (address, length, condition)
 
         return True
 
-    def exception_handler_single_step():
+    def exception_handler_single_step(self):
         #Pydbgのコメント:
         #この単一ステップイベントがハードウェアブレークポイントを受けて発生したのかをチェックし到達したブレークポイントを決定する
         #IntelのドキュメントによればDR6の中のBSフラグをチェックできるはず
         #しかしWindowsはそのフラグを適切に伝えてくれていない模様
+        print "[*] Exception address: 0x%08x" % self.exception_address
+
         if self.context.Dr6 & 0x1 and self.hardware_breakpoints.has_key(0):
             slot = 0
         elif self.context.Dr6 & 0x2 and self.hardware_breakpoints.has_key(1):
@@ -302,11 +300,10 @@ class debugger():
         print "[*] Hardware breakpoint removed."
         return continue_status
 
-    def bp_del_hw(self,slot):
+    def bp_del_hw(self, slot):
 
         #全アクティブスレッドについてブレークポイントを無効化
         for thread_id in self.enumerate_threads():
-
             context = self.get_thread_context(thread_id=thread_id)
 
             #フラグビットをリセットしてブレークポイントを除去
@@ -314,24 +311,49 @@ class debugger():
 
             #アドレスをゼロクリア
             if slot == 0:
-                context.Dr0 = 0x00000000
+                context.Dr0 = 0x0
             elif slot == 1:
-                context.Dr1 = 0x00000000
+                context.Dr1 = 0x0
             elif slot == 2:
-                context.Dr2 = 0x00000000
+                context.Dr2 = 0x0
             elif slot == 3:
-                context.Dr3 = 0x00000000
+                context.Dr3 = 0x0
 
             #条件フラグをクリア
             context.Dr7 &= ~(3 << ((slot * 4) + 16))
-
             #長さフラグをクリア
             context.Dr7 &= ~(3 << ((slot * 4) + 18))
 
             #ブレークポイントを除去したコンテキストを設定し直す
             h_thread = self.open_thread(thread_id)
-            kernel32.SetThreadContext(h_thread,byref(context))
+            kernel32.SetThreadContext(h_thread, byref(context))
 
         del self.hardware_breakpoints[slot]
+        return True
 
+    def bp_set_mem(self, address, size):
+        mbi = MEMORY_BASIC_INFORMATION()
+
+        #VirtualQueryEx()から返された値がMEMORY_BASIC_INFORMATIONのサイズに満たない場合はFalseを返す
+        if kernel32.VirtualQueryEx(self.h_process, address, byref(mbi), sizeof(mbi)) < sizeof(mbi):
+            return False
+
+        current_page = mbi.BaseAddress
+
+        #対象となる全ページにパーミッションを設定
+        while current_page <= address + size:
+
+            #該当するページをリストに追加
+            #これにより、我々の保護ページをOSまたは対象プロセスによって設定されたページから区別できる
+            self.guarded_pages.append(current_page)
+            old_protection = c_ulong(0)
+            if not kernel32.VirtualProtectEx(self.h_process, current_page, size,
+                                             mbi.Protect | PAGE_GUARD,
+                                             byref(old_protection)):
+                return False
+            #システムのデフォルトページサイズ分だけ範囲を広げる
+            current_page += self.page_size
+
+        #対象のメモリブレークポイントをグローバルな辞書に追加
+        self.memory_breakpoints[address] = (address, size, mbi)
         return True
